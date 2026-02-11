@@ -247,6 +247,11 @@ def create_material_concentration_boxplot(df, material_stats, material_column, o
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
 
+    # Overlay individual data points so n=1 categories are visible
+    for i, data in enumerate(conc_data):
+        x_jitter = np.random.default_rng(42).normal(i + 1, 0.04, size=len(data))
+        ax.scatter(x_jitter, data, color='black', s=15, alpha=0.4, zorder=3)
+
     from matplotlib.colors import Normalize
     import matplotlib.cm as cm
 
@@ -306,6 +311,11 @@ def create_material_reads_boxplot(df, material_stats, material_column, output_di
         color = plt.cm.RdYlGn(material_success / 100)
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
+
+    # Overlay individual data points so n=1 categories are visible
+    for i, data in enumerate(reads_data):
+        x_jitter = np.random.default_rng(42).normal(i + 1, 0.04, size=len(data))
+        ax.scatter(x_jitter, data, color='black', s=15, alpha=0.4, zorder=3)
 
     from matplotlib.colors import Normalize
     import matplotlib.cm as cm
@@ -573,7 +583,7 @@ def create_material_contamination_plot(contamination_df, output_dir,
 
 
 def create_failed_sample_investigation(df, material_column, output_dir):
-    """Plot 7: Strip plots of concentration & reads for failed samples by material and failure category."""
+    """Plot 7: Scatter of reads vs concentration for failed samples, colored by failure category."""
     click.echo("Creating plot 7: Failed sample investigation...")
 
     mismatches = df[df['matching'] == 0].copy()
@@ -581,9 +591,12 @@ def create_failed_sample_investigation(df, material_column, output_dir):
         click.echo("  No failed samples to plot")
         return None
 
-    def _failure_category(row):
+    def _reason_category(row):
         if row.get('reason') == 'QC Failed':
             return 'QC Failed'
+        return 'Contamination'
+
+    def _test_type(row):
         pk = row.get('proteinase_k_test', False)
         dt = row.get('dilution_test', False)
         if isinstance(pk, str):
@@ -594,49 +607,140 @@ def create_failed_sample_investigation(df, material_column, output_dir):
             return 'Proteinase K'
         if dt:
             return 'Dilution Test'
-        return 'Contamination'
+        return 'No Test'
 
-    mismatches['failure_category'] = mismatches.apply(_failure_category, axis=1)
+    mismatches['reason_category'] = mismatches.apply(_reason_category, axis=1)
+    mismatches['test_type'] = mismatches.apply(_test_type, axis=1)
+    mismatches['number_of_reads'] = mismatches['number_of_reads'].fillna(0)
 
-    category_order = ['QC Failed', 'Proteinase K', 'Dilution Test', 'Contamination']
-    palette = {
+    reason_palette = {
         'QC Failed': COLORS['qc_failed'],
-        'Proteinase K': COLORS['inhibition'],
-        'Dilution Test': '#9b59b6',
         'Contamination': COLORS['contamination'],
     }
+    test_markers = {
+        'Proteinase K': '^',
+        'Dilution Test': 's',
+        'No Test': 'o',
+    }
 
-    # Sort materials by sample count descending
-    material_order = mismatches[material_column].value_counts().index.tolist()
+    fig, ax = plt.subplots(figsize=(14, 8))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+    for reason in reason_palette:
+        for test in test_markers:
+            subset = mismatches[
+                (mismatches['reason_category'] == reason) & (mismatches['test_type'] == test)
+            ]
+            if len(subset) == 0:
+                continue
+            ax.scatter(subset['number_of_reads'], subset['library_concentration'],
+                       s=80, alpha=0.7, color=reason_palette[reason],
+                       marker=test_markers[test], edgecolors='white', linewidth=0.5)
 
-    # Top: concentration
-    sns.stripplot(data=mismatches, x=material_column, y='library_concentration',
-                  hue='failure_category', hue_order=category_order, palette=palette,
-                  dodge=True, jitter=0.25, alpha=0.7, size=6,
-                  order=material_order, ax=ax1)
-    ax1.set_ylabel('Library Concentration (ng/uL)')
-    ax1.set_title('Failed Samples: Concentration by Material & Failure Category',
-                   fontweight='bold')
-    ax1.set_xlabel('')
-    ax1.legend(title='Failure Category', bbox_to_anchor=(1.02, 1), loc='upper left')
-    ax1.grid(axis='y', alpha=0.3)
+    # Annotate each point with its material name (non-overlapping)
+    from adjustText import adjust_text
+    texts = []
+    for _, row in mismatches.iterrows():
+        texts.append(ax.text(row['number_of_reads'], row['library_concentration'],
+                             row[material_column], fontsize=7, alpha=0.7))
+    adjust_text(texts, ax=ax)
 
-    # Bottom: reads
-    sns.stripplot(data=mismatches, x=material_column, y='number_of_reads',
-                  hue='failure_category', hue_order=category_order, palette=palette,
-                  dodge=True, jitter=0.25, alpha=0.7, size=6,
-                  order=material_order, ax=ax2)
-    ax2.set_ylabel('Number of Reads')
-    ax2.set_title('Failed Samples: Read Count by Material & Failure Category',
-                   fontweight='bold')
-    ax2.set_xticklabels(ax2.get_xticklabels(), rotation=45, ha='right')
-    ax2.legend_.remove()
-    ax2.grid(axis='y', alpha=0.3)
+    ax.set_xlabel('Number of Reads', fontsize=12)
+    ax.set_ylabel('Library Concentration (ng/\u00b5L)', fontsize=12)
+    ax.set_title('Failed Samples: Reads vs Concentration by Failure Category',
+                 fontsize=14, fontweight='bold')
+    from matplotlib.lines import Line2D
+    color_handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c,
+                            markersize=8, label=r)
+                     for r, c in reason_palette.items()]
+    shape_handles = [Line2D([0], [0], marker=m, color='w', markerfacecolor='grey',
+                            markersize=8, label=t)
+                     for t, m in test_markers.items()]
+    first_legend = ax.legend(handles=color_handles, title='Failure Reason',
+                             bbox_to_anchor=(1.02, 1), loc='upper left')
+    ax.add_artist(first_legend)
+    ax.legend(handles=shape_handles, title='Test Type',
+              bbox_to_anchor=(1.02, 0.6), loc='upper left')
+    ax.grid(alpha=0.3)
 
     plt.tight_layout()
     filepath = os.path.join(output_dir, f"07_{material_column}_failed_sample_investigation.png")
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    return filepath
+
+
+def create_multi_species_genus_detection(df, material_column, output_dir):
+    """Plot 8: Genus-level detection proportion for multi-species samples by material."""
+    click.echo("Creating plot 8: Multi-species genus-level detection...")
+
+    from .stats import parse_species_list
+
+    if 'sanger_expected_species' not in df.columns:
+        click.echo("  No sanger_expected_species column available")
+        return None
+
+    rows = []
+    for _, row in df.iterrows():
+        expected = parse_species_list(row.get('sanger_expected_species', ''))
+        n_expected = len(expected)
+        if n_expected < 2:
+            continue
+
+        species_detected = n_expected - int(row.get('nanopore_missing_count', 0) or 0)
+        genus_only = int(row.get('genus_match_count', 0) or 0)
+        total_genus_detected = species_detected + genus_only
+        proportion = min(total_genus_detected / n_expected, 1.0)
+
+        rows.append({
+            material_column: row[material_column],
+            'genus_detection_proportion': proportion,
+        })
+
+    if not rows:
+        click.echo("  No multi-species samples found")
+        return None
+
+    plot_df = pd.DataFrame(rows)
+
+    # Sort material types by median proportion descending
+    medians = plot_df.groupby(material_column)['genus_detection_proportion'].median()
+    material_order = medians.sort_values(ascending=False).index.tolist()
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    box_data = [plot_df[plot_df[material_column] == m]['genus_detection_proportion'].values
+                for m in material_order]
+
+    bp = ax.boxplot(box_data, tick_labels=material_order, patch_artist=True,
+                    showmeans=True, widths=0.6)
+
+    for patch in bp['boxes']:
+        patch.set_facecolor(COLORS['match'])
+        patch.set_alpha(0.7)
+
+    # Overlay individual data points so n=1 categories are visible
+    for i, data in enumerate(box_data):
+        x_jitter = np.random.default_rng(42).normal(i + 1, 0.04, size=len(data))
+        ax.scatter(x_jitter, data, color='black', s=15, alpha=0.4, zorder=3)
+
+    # Annotate each box with sample count
+    for i, m in enumerate(material_order):
+        n = len(plot_df[plot_df[material_column] == m])
+        ax.text(i + 1, ax.get_ylim()[1] * 0.01 + 1.02, f'n={n}',
+                ha='center', va='bottom', fontsize=9)
+
+    ax.set_xlabel(material_column.replace('_', ' ').title(), fontsize=12)
+    ax.set_ylabel('Proportion of Expected Species Detected (Genus Level)', fontsize=12)
+    ax.set_title(
+        f'Genus-Level Detection for Multi-Species Samples by {material_column.replace("_", " ").title()}',
+        fontsize=14, fontweight='bold',
+    )
+    ax.set_xticklabels(material_order, rotation=45, ha='right')
+    ax.set_ylim(0, 1.05)
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    filepath = os.path.join(output_dir, f"08_{material_column}_multi_species_genus_detection.png")
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
     return filepath
@@ -649,7 +753,7 @@ def create_failed_sample_investigation(df, material_column, output_dir):
 def run_material_analysis(converged_df, mongo_data, output_dir,
                           material_column='material',
                           contamination_material='cerebrospinalvätska'):
-    """Run the full material analysis: filter, stats, 7 plots, save CSV.
+    """Run the full material analysis: filter, stats, 8 plots, save CSV.
 
     Parameters
     ----------
@@ -716,6 +820,10 @@ def run_material_analysis(converged_df, mongo_data, output_dir,
         created.append(filepath)
 
     filepath = create_failed_sample_investigation(df, material_column, output_dir)
+    if filepath:
+        created.append(filepath)
+
+    filepath = create_multi_species_genus_detection(df, material_column, output_dir)
     if filepath:
         created.append(filepath)
 

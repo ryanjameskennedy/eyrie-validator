@@ -61,14 +61,16 @@ All files are written to the directory specified by `-o`.
 5. `05_dilution_test_results.png` - 1:1 vs 1:10 dilution paired results
 6. `06_dilution_sample_distribution.png` - stacked bar comparing dilution outcomes
 
-### Material analysis plots (6)
+### Material analysis plots (8)
 
-1. `01_{material}_concentration_boxplot.png` - concentration distribution by material type
-2. `02_{material}_reads_boxplot.png` - read count distribution by material type
+1. `01_{material}_concentration_boxplot.png` - concentration distribution by material type (with individual data point overlay for n=1 visibility)
+2. `02_{material}_reads_boxplot.png` - read count distribution by material type (with individual data point overlay for n=1 visibility)
 3. `03_{material}_success_rates.png` - success rate bar chart by material
 4. `04_{material}_concentration_vs_reads_bubble.png` - mean concentration vs mean reads bubble plot (size = sample count, colour = success rate)
 5. `05_{material}_contamination_heatmap.png` - material vs mismatch reason heatmap
 6. `06_{contamination_material}_contamination_analysis.png` - stacked barplot of contaminant species abundance per sample
+7. `07_{material}_failed_sample_investigation.png` - scatter of reads vs concentration for failed samples (colour = failure reason, marker shape = test type)
+8. `08_{material}_multi_species_genus_detection.png` - genus-level detection proportion boxplot for multi-species samples (with individual data point overlay for n=1 visibility)
 
 ## Integration with eyrie-popup
 
