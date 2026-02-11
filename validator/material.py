@@ -751,14 +751,135 @@ def create_multi_species_genus_detection(df, material_column, output_dir):
     return filepath
 
 
+def create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_run_id=None):
+    """Plot 9: Spike (Agrobacterium fabrum) abundance by IC3/IC4 and sample type.
+
+    Creates a 4-box boxplot comparing Agrobacterium fabrum abundance (%)
+    across Validation IC3, Validation IC4, Negative Control IC3, and
+    Negative Control IC4.
+    """
+    click.echo("Creating plot 9: Spike abundance boxplot...")
+
+    if full_df is None or 'spike_concentration' not in full_df.columns:
+        click.echo("  No spike concentration data available")
+        return None
+
+    df = full_df.copy()
+
+    # Optional run filter
+    if sequencing_run_id is not None:
+        if 'sequencing_run_id' in df.columns:
+            df = df[df['sequencing_run_id'] == sequencing_run_id]
+            click.echo(f"  Filtered to sequencing run: {sequencing_run_id} ({len(df)} samples)")
+        else:
+            click.echo("  No sequencing_run_id column available for filtering")
+
+    # Keep only rows with a valid spike concentration (IC3 or IC4)
+    df = df[df['spike_concentration'].isin(['IC3', 'IC4'])]
+    if len(df) == 0:
+        click.echo("  No samples with IC3/IC4 spike concentration")
+        return None
+
+    # Classify sample type
+    def _classify_sample_type(sample_type):
+        if pd.notna(sample_type) and 'negative control' in str(sample_type).lower():
+            return 'Negative Control'
+        return 'Validation'
+
+    df['sample_group'] = df['sample_type'].apply(_classify_sample_type)
+
+    # Look up Agrobacterium fabrum abundance from mongo_data
+    def _get_spike_abundance(sample_id):
+        doc = mongo_data.get(sample_id)
+        if not doc:
+            return 0.0
+        hits = doc.get('taxonomic_data', {}).get('hits', [])
+        for hit in hits:
+            if hit.get('species', '').lower() == 'agrobacterium fabrum':
+                return float(hit.get('abundance', 0))
+        return 0.0
+
+    df['spike_abundance'] = df['sample_id'].apply(_get_spike_abundance)
+
+    # Build the 4 groups
+    group_defs = [
+        ('Validation\nIC3', 'Validation', 'IC3'),
+        ('Validation\nIC4', 'Validation', 'IC4'),
+        ('Neg Control\nIC3', 'Negative Control', 'IC3'),
+        ('Neg Control\nIC4', 'Negative Control', 'IC4'),
+    ]
+
+    box_data = []
+    box_labels = []
+    box_counts = []
+
+    for label, group, conc in group_defs:
+        subset = df[(df['sample_group'] == group) & (df['spike_concentration'] == conc)]
+        values = subset['spike_abundance'].values
+        box_data.append(values)
+        box_labels.append(label)
+        box_counts.append(len(values))
+
+    # Skip if all groups are empty
+    if all(len(d) == 0 for d in box_data):
+        click.echo("  No data in any spike group")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Colors: differentiate by concentration
+    group_colors = ['#5B9BD5', '#2E75B6', '#ED7D31', '#C55A11']
+
+    bp = ax.boxplot(
+        box_data, tick_labels=box_labels, patch_artist=True,
+        showmeans=True, widths=0.6,
+        boxprops=dict(linewidth=1.5),
+        whiskerprops=dict(linewidth=1.5),
+        capprops=dict(linewidth=1.5),
+        medianprops=dict(linewidth=2, color='darkred'),
+        meanprops=dict(marker='D', markerfacecolor='darkblue', markersize=6, markeredgecolor='black'),
+    )
+    for patch, color in zip(bp['boxes'], group_colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+
+    # Overlay jittered scatter points
+    rng = np.random.default_rng(42)
+    for i, data in enumerate(box_data):
+        if len(data) > 0:
+            x_jitter = rng.normal(i + 1, 0.04, size=len(data))
+            ax.scatter(x_jitter, data, color='black', s=15, alpha=0.4, zorder=3)
+
+    # Add sample count annotations below each box label
+    y_min = ax.get_ylim()[0]
+    for i, n in enumerate(box_counts):
+        ax.text(i + 1, y_min - (ax.get_ylim()[1] - y_min) * 0.05,
+                f'n={n}', ha='center', va='top', fontsize=9, fontstyle='italic')
+
+    title = 'Spike (Agrobacterium fabrum) Abundance by Concentration and Sample Type'
+    if sequencing_run_id:
+        title += f'\n(Run: {sequencing_run_id})'
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_ylabel('Abundance (%)', fontsize=12)
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    filepath = os.path.join(output_dir, "09_spike_abundance_boxplot.png")
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    return filepath
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
 def run_material_analysis(converged_df, mongo_data, output_dir,
                           material_column='material',
-                          contamination_material='cerebrospinalvätska'):
-    """Run the full material analysis: filter, stats, 8 plots, save CSV.
+                          contamination_material='cerebrospinalvätska',
+                          full_df=None,
+                          sequencing_run_id=None):
+    """Run the full material analysis: filter, stats, 9 plots, save CSV.
 
     Parameters
     ----------
@@ -772,6 +893,10 @@ def run_material_analysis(converged_df, mongo_data, output_dir,
         Column name for material grouping.
     contamination_material : str
         Specific material type for contamination analysis.
+    full_df : DataFrame, optional
+        Unfiltered converged DataFrame (includes controls) for spike analysis.
+    sequencing_run_id : str, optional
+        If provided, restrict spike plot to this sequencing run only.
     """
     setup_plot_style()
     os.makedirs(output_dir, exist_ok=True)
@@ -829,6 +954,10 @@ def run_material_analysis(converged_df, mongo_data, output_dir,
         created.append(filepath)
 
     filepath = create_multi_species_genus_detection(df, material_column, output_dir)
+    if filepath:
+        created.append(filepath)
+
+    filepath = create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_run_id=sequencing_run_id)
     if filepath:
         created.append(filepath)
 

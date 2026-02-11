@@ -37,10 +37,12 @@ def cli():
               help='Column name for material grouping in material analysis')
 @click.option('--contamination-material', default='cerebrospinalvätska',
               help='Specific material type for contamination analysis')
+@click.option('--sequencing-run-id', default=None,
+              help='Filter spike analysis to a specific sequencing run ID')
 @click.option('-v', '--verbose', is_flag=True,
               help='Enable verbose output')
 def validate(input_csv, output_dir, mongo_uri, mongo_db, mongo_collection,
-             material_column, contamination_material, verbose):
+             material_column, contamination_material, sequencing_run_id, verbose):
     """Run full 16S validation pipeline.
 
     Takes a CSV with sample_id, dilution_test, proteinase_k_test columns,
@@ -111,6 +113,8 @@ def validate(input_csv, output_dir, mongo_uri, mongo_db, mongo_collection,
         filtered_df, mongo_data, output_dir,
         material_column=material_column,
         contamination_material=contamination_material,
+        full_df=converged_df,
+        sequencing_run_id=sequencing_run_id,
     )
 
     click.echo("\n" + "=" * 80)

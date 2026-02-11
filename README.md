@@ -29,6 +29,7 @@ eyrie-validator validate -i samples.csv -o results/
 | `--mongo-collection` | `samples` | MongoDB collection name |
 | `--material-column` | `material` | Column name for material grouping |
 | `--contamination-material` | `cerebrospinalvatska` | Material type for contamination analysis |
+| `--sequencing-run-id` | `None` | Filter spike analysis to a specific sequencing run ID |
 | `-v`, `--verbose` | off | Enable verbose output |
 
 ### Input CSV format
@@ -61,7 +62,7 @@ All files are written to the directory specified by `-o`.
 5. `05_dilution_test_results.png` - 1:1 vs 1:10 dilution paired results
 6. `06_dilution_sample_distribution.png` - stacked bar comparing dilution outcomes
 
-### Material analysis plots (8)
+### Material analysis plots (9)
 
 1. `01_{material}_concentration_boxplot.png` - concentration distribution by material type (with individual data point overlay for n=1 visibility)
 2. `02_{material}_reads_boxplot.png` - read count distribution by material type (with individual data point overlay for n=1 visibility)
@@ -71,6 +72,7 @@ All files are written to the directory specified by `-o`.
 6. `06_{contamination_material}_contamination_analysis.png` - stacked barplot of contaminant species abundance per sample
 7. `07_{material}_failed_sample_investigation.png` - scatter of reads vs concentration for failed samples (colour = failure reason, marker shape = test type)
 8. `08_{material}_multi_species_genus_detection.png` - genus-level detection proportion boxplot for multi-species samples (with individual data point overlay for n=1 visibility)
+9. `09_spike_abundance_boxplot.png` - Agrobacterium fabrum spike abundance (%) boxplot by IC3/IC4 concentration and sample type (Validation vs Negative Control). Optionally filtered by `--sequencing-run-id`.
 
 ## Integration with eyrie-popup
 

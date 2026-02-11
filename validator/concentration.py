@@ -98,6 +98,8 @@ def build_converged_dataframe(input_df, mongo_data, matching_df):
             'sanger_expected_species': metadata.get('sanger_expected_species'),
             'library_concentration': metadata.get('library_concentration'),
             'dilution': metadata.get('dilution'),
+            'spike_concentration': metadata.get('spike_concentration'),
+            'sequencing_run_id': doc.get('sequencing_run_id'),
         }
 
         # Extract number_of_reads from nested nanoplot path
