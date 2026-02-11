@@ -788,6 +788,16 @@ def create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_r
 
     df['sample_group'] = df['sample_type'].apply(_classify_sample_type)
 
+    # Exclude QC-failed samples
+    if 'qc' in df.columns:
+        qc_mask = df['qc'].apply(
+            lambda v: pd.notna(v) and str(v).lower() in ('false', 'fail', 'failed')
+        )
+        excluded = qc_mask.sum()
+        if excluded > 0:
+            click.echo(f"  Excluded {excluded} QC-failed samples")
+        df = df[~qc_mask]
+
     # Look up Agrobacterium fabrum abundance from mongo_data
     def _get_spike_abundance(sample_id):
         doc = mongo_data.get(sample_id)
@@ -825,6 +835,15 @@ def create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_r
         click.echo("  No data in any spike group")
         return None
 
+    # Print spike abundance summary
+    for label, data in zip(box_labels, box_data):
+        if len(data) > 0:
+            click.echo(f"  {label.replace(chr(10), ' ')}: n={len(data)}, "
+                       f"min={np.min(data):.2f}%, max={np.max(data):.2f}%, "
+                       f"median={np.median(data):.2f}%, mean={np.mean(data):.2f}%")
+        else:
+            click.echo(f"  {label.replace(chr(10), ' ')}: n=0")
+
     fig, ax = plt.subplots(figsize=(10, 7))
 
     # Colors: differentiate by concentration
@@ -850,11 +869,9 @@ def create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_r
             x_jitter = rng.normal(i + 1, 0.04, size=len(data))
             ax.scatter(x_jitter, data, color='black', s=15, alpha=0.4, zorder=3)
 
-    # Add sample count annotations below each box label
-    y_min = ax.get_ylim()[0]
+    # Add sample count annotations above each box
     for i, n in enumerate(box_counts):
-        ax.text(i + 1, y_min - (ax.get_ylim()[1] - y_min) * 0.05,
-                f'n={n}', ha='center', va='top', fontsize=9, fontstyle='italic')
+        ax.text(i + 1, 102, f'n={n}', ha='center', va='bottom', fontsize=9, fontstyle='italic')
 
     title = 'Spike (Agrobacterium fabrum) Abundance by Concentration and Sample Type'
     if sequencing_run_id:
@@ -870,6 +887,122 @@ def create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_r
     return filepath
 
 
+def create_negative_control_abundance_barplot(full_df, mongo_data, output_dir):
+    """Plot 10: Stacked species abundance barplot for negative control samples.
+
+    Shows what contaminants appear in negative control samples. Species with
+    >1% abundance are shown individually; all others are grouped as "Other".
+    This plot always shows all negative controls (no sequencing run filter).
+    """
+    click.echo("Creating plot 10: Negative control abundance barplot...")
+
+    if full_df is None:
+        click.echo("  No full dataframe available")
+        return None
+
+    # Identify negative control samples
+    df = full_df.copy()
+    nc_mask = df['sample_type'].apply(
+        lambda v: pd.notna(v) and 'negative control' in str(v).lower()
+    )
+    df = df[nc_mask]
+
+    if len(df) == 0:
+        click.echo("  No negative control samples found")
+        return None
+
+    click.echo(f"  Found {len(df)} negative control samples")
+
+    # Collect species abundance per sample, applying 1% threshold
+    sample_ids = df['sample_id'].values
+    per_sample = []  # list of dicts: {species: abundance}
+
+    for sid in sample_ids:
+        doc = mongo_data.get(sid)
+        if not doc:
+            per_sample.append({})
+            continue
+        hits = doc.get('taxonomic_data', {}).get('hits', [])
+        species_dict = {}
+        other_total = 0.0
+        for hit in hits:
+            species = hit.get('species', 'Unknown')
+            abundance = float(hit.get('abundance', 0))
+            if abundance > 1.0:
+                species_dict[species] = abundance
+            else:
+                other_total += abundance
+        if other_total > 0:
+            species_dict['Other'] = other_total
+        per_sample.append(species_dict)
+
+    # Collect all species across all samples
+    all_species = set()
+    for sd in per_sample:
+        all_species.update(sd.keys())
+
+    if not all_species:
+        click.echo("  No taxonomic hits found in negative control samples")
+        return None
+
+    # Sort species by total abundance descending, but keep "Other" last
+    species_totals = {}
+    for species in all_species:
+        species_totals[species] = sum(sd.get(species, 0) for sd in per_sample)
+    sorted_species = sorted(
+        [s for s in all_species if s != 'Other'],
+        key=lambda s: species_totals[s],
+        reverse=True,
+    )
+    if 'Other' in all_species:
+        sorted_species.append('Other')
+
+    # Build matrix: (n_samples, n_species)
+    matrix = np.array([
+        [sd.get(sp, 0) for sp in sorted_species]
+        for sd in per_sample
+    ])
+
+    # Colormap
+    species_cmap = plt.get_cmap('tab20')
+    n_species = len(sorted_species)
+    species_colors = [species_cmap(i % 20) for i in range(n_species)]
+    # Make "Other" grey
+    if sorted_species[-1] == 'Other':
+        species_colors[-1] = (0.7, 0.7, 0.7, 1.0)
+
+    fig_width = max(10, len(sample_ids) * 0.6)
+    fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+    x = np.arange(len(sample_ids))
+    bottoms = np.zeros(len(sample_ids))
+
+    for idx, species in enumerate(sorted_species):
+        values = matrix[:, idx]
+        ax.bar(x, values, bottom=bottoms, color=species_colors[idx], edgecolor='white',
+               linewidth=0.3, label=species)
+        bottoms += values
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(sample_ids, rotation=90, fontsize=8)
+    ax.set_xlabel('Sample', fontsize=12)
+    ax.set_ylabel('Abundance (%)', fontsize=12)
+    ax.set_title('Negative Control Sample Abundance (>1% Species)',
+                 fontsize=14, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+
+    # Place species legend outside the plot area
+    if sorted_species:
+        ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1), loc='upper left',
+                  borderaxespad=0, title='Species')
+
+    plt.tight_layout()
+    filepath = os.path.join(output_dir, "10_negative_control_abundance.png")
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    return filepath
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -879,7 +1012,7 @@ def run_material_analysis(converged_df, mongo_data, output_dir,
                           contamination_material='cerebrospinalvätska',
                           full_df=None,
                           sequencing_run_id=None):
-    """Run the full material analysis: filter, stats, 9 plots, save CSV.
+    """Run the full material analysis: filter, stats, 10 plots, save CSV.
 
     Parameters
     ----------
@@ -958,6 +1091,10 @@ def run_material_analysis(converged_df, mongo_data, output_dir,
         created.append(filepath)
 
     filepath = create_spike_abundance_boxplot(full_df, mongo_data, output_dir, sequencing_run_id=sequencing_run_id)
+    if filepath:
+        created.append(filepath)
+
+    filepath = create_negative_control_abundance_barplot(full_df, mongo_data, output_dir)
     if filepath:
         created.append(filepath)
 
