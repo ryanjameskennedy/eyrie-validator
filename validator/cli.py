@@ -56,7 +56,7 @@ def validate(input_csv, output_dir, mongo_uri, mongo_db, mongo_collection,
     """
     from .mongo import connect_to_mongo, fetch_samples_bulk
     from .matching import generate_matching
-    from .concentration import build_converged_dataframe, run_concentration_analysis
+    from .concentration import build_converged_dataframe, print_read_distributions, run_concentration_analysis
     from .material import run_material_analysis
 
     click.echo("=" * 80)
@@ -96,6 +96,9 @@ def validate(input_csv, output_dir, mongo_uri, mongo_db, mongo_collection,
 
     # 4. Build converged DataFrame
     converged_df = build_converged_dataframe(input_df, mongo_data, matching_df)
+
+    # 4b. Print read and top-hit distributions
+    print_read_distributions(converged_df, mongo_data)
 
     # 5. Run concentration analysis (saves CSV + 6 plots)
     click.echo("\n" + "=" * 80)

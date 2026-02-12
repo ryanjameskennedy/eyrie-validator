@@ -68,6 +68,57 @@ def determine_reason(row):
     return 'Contamination'
 
 
+def print_read_distributions(converged_df, mongo_data):
+    """Print min/max/mean/median for total reads, top-hit abundance, and estimated counts."""
+
+    click.echo("\n" + "-" * 80)
+    click.echo("READ & TOP-HIT DISTRIBUTIONS")
+    click.echo("-" * 80)
+
+    # 1. Total reads per sample
+    reads = converged_df['number_of_reads'].dropna()
+    if len(reads) > 0:
+        click.echo(f"\nTotal reads per sample (n={len(reads)}):")
+        click.echo(f"  Min:    {reads.min():.0f}")
+        click.echo(f"  Max:    {reads.max():.0f}")
+        click.echo(f"  Mean:   {reads.mean():.1f}")
+        click.echo(f"  Median: {reads.median():.1f}")
+    else:
+        click.echo("\nNo read count data available")
+
+    # 2. Top-hit abundance and estimated counts per sample
+    top_abundances = []
+    top_est_counts = []
+
+    for doc in mongo_data.values():
+        hits = doc.get('taxonomic_data', {}).get('hits', [])
+        if not hits:
+            continue
+        top_hit = max(hits, key=lambda h: float(h.get('abundance', 0)))
+        top_abundances.append(float(top_hit.get('abundance', 0)))
+        est = top_hit.get('estimated_counts')
+        if est is not None:
+            top_est_counts.append(float(est))
+
+    if top_abundances:
+        arr = np.array(top_abundances)
+        click.echo(f"\nTop-hit abundance per sample (n={len(arr)}):")
+        click.echo(f"  Min:    {arr.min():.2f}%")
+        click.echo(f"  Max:    {arr.max():.2f}%")
+        click.echo(f"  Mean:   {arr.mean():.2f}%")
+        click.echo(f"  Median: {np.median(arr):.2f}%")
+
+    if top_est_counts:
+        arr = np.array(top_est_counts)
+        click.echo(f"\nTop-hit estimated counts per sample (n={len(arr)}):")
+        click.echo(f"  Min:    {arr.min():.0f}")
+        click.echo(f"  Max:    {arr.max():.0f}")
+        click.echo(f"  Mean:   {arr.mean():.1f}")
+        click.echo(f"  Median: {np.median(arr):.1f}")
+    elif top_abundances:
+        click.echo("\nNo estimated counts data available in top hits")
+
+
 def build_converged_dataframe(input_df, mongo_data, matching_df):
     """Merge user CSV + MongoDB metadata + matching data into one DataFrame.
 
