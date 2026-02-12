@@ -71,16 +71,17 @@ def determine_reason(row):
 def print_read_distributions(converged_df, mongo_data):
     """Print min/max/mean/median for total reads, top-hit abundance, and estimated counts.
 
-    Excludes negative controls and QC-failed samples.
+    Excludes controls (positive & negative) and QC-failed samples.
     """
 
     click.echo("\n" + "-" * 80)
-    click.echo("READ & TOP-HIT DISTRIBUTIONS (excl. negative controls & QC failures)")
+    click.echo("READ & TOP-HIT DISTRIBUTIONS (excl. controls & QC failures)")
     click.echo("-" * 80)
 
-    # Filter out negative controls and QC-failed samples
+    # Filter out controls and QC-failed samples
     df = converged_df.copy()
     df = df[~df['sample_type'].str.contains('negative control', case=False, na=False)]
+    df = df[~df['sample_type'].str.contains('positive control', case=False, na=False)]
     df = df[df['reason'] != 'QC Failed']
     valid_sids = set(df['sample_id'])
 
